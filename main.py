@@ -1,17 +1,28 @@
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QLabel, QGridLayout, QLineEdit,\
     QPushButton, QMainWindow, QTableWidget, QTableWidgetItem, QDialog, QVBoxLayout, \
     QComboBox, QToolBar, QStatusBar, QMessageBox
 from PyQt6.QtGui import QAction, QIcon
 import sys
-import sqlite3
+import mysql.connector
+import env
+import os
 
 
 class DatabaseConnection:
-    def __init__(self, database_file='database.db'):
-        self.database_file = database_file
+    def __init__(self, host="localhost", user=os.getenv('DB_USER'), password=os.getenv('DB_PW'), database=os.getenv('DB_ADDRESS')):
+        self.host = host
+        self.user = user
+        self.password = password
+        self.database = database
 
     def connect(self):
-        connection = sqlite3.connect(self.database_file)
+        connection = mysql.connector.connect(
+            host=self.host,
+            user=self.user,
+            password=self.password,
+            database=self.database
+        )
         return connection
 
 
@@ -38,8 +49,8 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self.about)
 
         search_action = QAction(QIcon('icons/search.png'), 'Search', self)
-        search_action.triggered.connect(self.search_box)
         edit_menu_item.addAction(search_action)
+        search_action.triggered.connect(self.search)
 
         # main window
         self.table = QTableWidget()
@@ -81,7 +92,9 @@ class MainWindow(QMainWindow):
 
     def load_data(self):
         connection = DatabaseConnection().connect()
-        result = connection.execute('SELECT * FROM students')
+        cursor = connection.cursor()
+        cursor.execute('SELECT * FROM students')
+        result = cursor.fetchall()
         self.table.setRowCount(0)
         for row_number, row_data in enumerate(result):
             self.table.insertRow(row_number)
@@ -95,8 +108,8 @@ class MainWindow(QMainWindow):
         dialog = InsertDialog()
         dialog.exec()
 
-    def search_box(self):
-        dialog = SearchBox()
+    def search(self):
+        dialog = SearchDialog()
         dialog.exec()
 
     def edit(self):
@@ -154,7 +167,7 @@ class InsertDialog(QDialog):
         cursor = connection.cursor()
         # Inserts entry into database
         cursor.execute(
-            'INSERT INTO students (name, course, mobile) VALUES (?,?,?)', (name, course, mobile))
+            'INSERT INTO students (name, course, mobile) VALUES (%s,%s,%s)', (name, course, mobile))
         # commit and closes connections
         connection.commit()
         cursor.close()
@@ -165,7 +178,7 @@ class InsertDialog(QDialog):
         main_window.load_data()
 
 
-class SearchBox(QDialog):
+class SearchDialog(QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Search Students')
@@ -173,14 +186,31 @@ class SearchBox(QDialog):
         layout = QVBoxLayout()
 
         # defines name to be searched in DB
-        self.search_argument = QLineEdit()
-        self.search_argument.setPlaceholderText('Name')
-        layout.addWidget(self.search_argument)
+        self.student_name = QLineEdit()
+        self.student_name.setPlaceholderText('Name')
+        layout.addWidget(self.student_name)
 
+        # search button
         button = QPushButton('Search')
+        button.clicked.connect(self.search)
         layout.addWidget(button)
 
+        # creates layout
         self.setLayout(layout)
+
+    def search(self):
+        name = self.student_name.text()
+        connection = DatabaseConnection().connect()
+        cursor = connection.cursor()
+        cursor.execute('SELECT * FROM students WHERE name = %s', (name,))
+        cursor.fetchall()
+        items = main_window.table.findItems(
+            name, Qt.MatchFlag.MatchFixedString)
+        for item in items:
+            main_window.table.item(item.row(), 1).setSelected(True)
+
+        cursor.close()
+        connection.close()
 
 
 class EditDialog(QDialog):
@@ -234,7 +264,7 @@ class EditDialog(QDialog):
         cursor = connection.cursor()
         # execute command to update entry
         cursor.execute(
-            'UPDATE students SET name = ?, course = ?, mobile = ? WHERE id = ?', (
+            'UPDATE students SET name = %s, course = %s, mobile = %s WHERE id = %s', (
                 self.student_name.text(),
                 self.course_name.itemText(self.course_name.currentIndex()),
                 self.mobile_number.text(),
@@ -246,6 +276,7 @@ class EditDialog(QDialog):
         cursor.close()
         connection.close()
         main_window.load_data()
+        self.close()
 
 
 class DeleteDialog(QDialog):
@@ -280,7 +311,7 @@ class DeleteDialog(QDialog):
         # filter student and delete student
         connection = DatabaseConnection().connect()
         cursor = connection.cursor()
-        cursor.execute('DELETE from students WHERE id = ?', (student_id,))
+        cursor.execute('DELETE from students WHERE id = %s', (student_id,))
 
         # commit and closes connections
         connection.commit()
